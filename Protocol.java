@@ -7,6 +7,10 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.util.Scanner;
+
 
 public class Protocol {
 
@@ -60,16 +64,47 @@ public class Protocol {
 	 * This method sends protocol metadata to the server.
 	 * See coursework specification for full details.	
 	 */
-	public void sendMetadata()   { 
-		System.exit(0);
-	} 
+	public void sendMetadata()  {
+		//Open file
+		File metadataFile = Protocol.instance.inputFile;
+		//Read file
+		try (Scanner Reading = new Scanner(metadataFile)) {
+            //Loops until there are no next lines and counts current amout of lines
+            while (Reading.hasNextLine()){
+                fileTotalReadings = fileTotalReadings + 1;
+                Reading.nextLine();
 
+                //Concatenating payload string and instantiating segment object
+                String payload = (fileTotalReadings + "," + outputFileName + "," + maxPatchSize);
+                Segment MetaSeg = new Segment(0,SegmentType.Meta,payload,payload.length());
+                System.out.println("Sending Metadata Request");
+
+                //Converts segment of meta data to bytes and converts those bytes into a packet to be sent
+                byte[] DataSend = MetaSeg.getBytes();
+                DatagramPacket PacketSend = new DatagramPacket(
+                        DataSend,
+                        DataSend.length,
+                        ipAddress,
+                        portNumber
+                );
+                socket.send(PacketSend);
+                System.out.println("CLIENT: Meta data segment sent to server");
+			}
+		}
+        //Error returned if no file found
+		catch(FileNotFoundException e){
+			System.out.println("Error reading metadata file");
+			e.printStackTrace();
+		}
+        MetaSegment();
+    }
 
 	/* 
 	 * This method read and send the next data segment (dataSeg) to the server. 
 	 * See coursework specification for full details.
 	 */
-	public void readAndSend() { 
+	public void readAndSend() {
+
 		System.exit(0);
 	}
 
