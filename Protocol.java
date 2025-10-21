@@ -1,6 +1,6 @@
 /*
  * Replace the following string of 0s with your student number
- * 000000000
+ * c4029726
  */
 import java.io.File;
 import java.net.DatagramSocket;
@@ -8,8 +8,11 @@ import java.net.InetAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.io.File;
+//Added imports
 import java.io.FileNotFoundException;
 import java.util.Scanner;
+import java.util.ArrayList;
+
 
 
 public class Protocol {
@@ -64,56 +67,141 @@ public class Protocol {
 	 * This method sends protocol metadata to the server.
 	 * See coursework specification for full details.	
 	 */
-	public void sendMetadata()  {
-		//Open file
-		File metadataFile = Protocol.instance.inputFile;
-		//Read file
-		try (Scanner Reading = new Scanner(metadataFile)) {
-            //Loops until there are no next lines and counts current amout of lines
-            while (Reading.hasNextLine()){
-                fileTotalReadings = fileTotalReadings + 1;
+	public void sendMetadata() {
+        //Sets variable to read file to null (nothing)
+        Scanner Reading = null;
+        //Tries if a file is read
+		try{
+            //Reads input file
+            Reading = new Scanner(inputFile);
+            //Loops until there are no next lines and counts current amout of lines (count starts from 1 not 0)
+            while (Reading.hasNextLine()) {
+                fileTotalReadings++;
                 Reading.nextLine();
-
-                //Concatenating payload string and instantiating segment object
-                String payload = (fileTotalReadings + "," + outputFileName + "," + maxPatchSize);
-                Segment MetaSeg = new Segment(0,SegmentType.Meta,payload,payload.length());
-                System.out.println("Sending Metadata Request");
-
-                //Converts segment of meta data to bytes and converts those bytes into a packet to be sent
-                byte[] DataSend = MetaSeg.getBytes();
-                DatagramPacket PacketSend = new DatagramPacket(
-                        DataSend,
-                        DataSend.length,
-                        ipAddress,
-                        portNumber
-                );
-                socket.send(PacketSend);
-                System.out.println("CLIENT: Meta data segment sent to server");
-			}
-		}
+            }
+        }
         //Error returned if no file found
-		catch(FileNotFoundException e){
-			System.out.println("Error reading metadata file");
-			e.printStackTrace();
-		}
-        MetaSegment();
-    }
+        catch(FileNotFoundException e){
+            //Message printed in terminal and error message printed too
+            System.out.println("CLIENT ERROR: Error reading metadata file");
+            e.printStackTrace();
+            return;
+        }
+        //Concatenating payload string and instantiating segment object
+        String payload = (fileTotalReadings + "," + outputFileName + "," + maxPatchSize);
+        Segment MetaSeg = new Segment(0,SegmentType.Meta,payload,payload.length());
+        System.out.println("Sending Metadata Request");
+
+        //Converts payload of metadata segment to bytes and converts those bytes into a packet to be sent
+        byte[] DataSend = MetaSeg.getPayLoad().getBytes();
+        java.net.DatagramPacket PacketSend = new java.net.DatagramPacket(
+                DataSend,
+                DataSend.length,
+                ipAddress,
+                portNumber
+        );
+        //Tries if the packet can be sent
+        try{
+            //Sends packet to socket and returns message in terminal
+            socket.send(PacketSend);
+            System.out.println("CLIENT: Meta data segment sent to server");
+        }
+        //If packet cannot be found or sent message returned
+        catch(java.io.IOException e){
+            System.out.println("CLIENT ERROR: Failed to send meta data");
+            e.printStackTrace();
+        }
+        //If something still saved in Reading variable then the variable is closed as not needed
+        finally{
+            if(Reading!=null){
+                Reading.close();
+            }
+        }
+        //MetaSegment();
+        }
+
 
 	/* 
 	 * This method read and send the next data segment (dataSeg) to the server. 
 	 * See coursework specification for full details.
 	 */
 	public void readAndSend() {
+        try{
+            //Reads input file and creates list to store payload's if csv lines are bigger than patch size
+            Scanner Reading = new Scanner(inputFile);
+            ArrayList<String> PayLoadList = new ArrayList<String>();
+            //Loops while the there is another line that hasn't been read
+            while (Reading.hasNextLine()) {
+                //Declares payload to save currently read lines and patchcount to count to ensure maxPatch isn't met
+                String Payload = "";
+                int PatchCount = 0;
+                //Loops for max patch size
+                while (Reading.hasNextLine() && maxPatchSize > PatchCount){
+                    //Count increments by 1, reads current line and concatenates to payload
+                    PatchCount++;
+                    String CurLine = Reading.nextLine().trim();
+                    Payload = Payload + (CurLine);
+                    //If there are other records seperate with ";"
+                    if (Reading.hasNextLine()) {
+                        Payload = Payload + (";");
+                    }
+                }
+                //If run out of lines or max patch met, that payload is added to list
+                PayLoadList.add(Payload);
+            }
+            //Loops for the amount of payloads in list
+            for (String i : PayLoadList){
+                //Finds index of payload for segment number and instantiates segment
+                int index = PayLoadList.indexOf(i);
+                int length = i.length();
+                Segment ReadSeg = new Segment((index + 1),SegmentType.Data,i,length);
 
-		System.exit(0);
-	}
+                System.out.println("CLIENT: Preparing datapacket for segment number " + (index + 1));
+
+                byte[] dataByte = ReadSeg.getPayLoad().getBytes();
+                java.net.DatagramPacket packet = new java.net.DatagramPacket(
+                        dataByte,
+                        dataByte.length,
+                        ipAddress,
+                        portNumber
+                );
+                try{
+                socket.send(packet);
+                totalSegments++;
+                System.out.println("CLIENT: Sending packet number: " + (index + 1));
+                System.out.println("CLIENT: Packet length: " + packet.getLength());
+                System.out.println("CLIENT: Packet payload: " + packet.getAddress());
+                System.out.println("CLIENT: Packet port: " + packet.getPort());
+                System.out.println("CLIENT: Packet payload: " + ReadSeg.getPayLoad());
+                }
+                catch(java.io.IOException e){
+                    System.out.println("CLIENT ERROR: Failed to send data");
+                    e.printStackTrace();
+                }
+            }
+        }
+        //If there is an issue reading the file
+        catch(java.io.FileNotFoundException e){
+            System.out.println("CLIENT ERROR: Error reading file");
+            e.printStackTrace();
+            return;
+        }
+    }
+
 
 	/* 
 	 * This method receives the current Ack segment (ackSeg) from the server 
 	 * See coursework specification for full details.
 	 */
-	public boolean receiveAck() { 
-		System.exit(0);
+	public boolean receiveAck() {
+        //Prints in terminal message to let user know the current segment
+        System.out.println("CLIENT: Waiting for ACK signal number " + ackSeg.getSeqNum());
+        try{
+            byte[]
+        }
+        catch{
+
+        }
 		return false;
 	}
 
