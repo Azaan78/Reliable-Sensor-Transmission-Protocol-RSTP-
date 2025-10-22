@@ -49,6 +49,8 @@ public class Protocol {
 	private int sentReadings;         // number of readings successfully sent and acknowledged
 	private int totalSegments;        // total segments that the client sent to the server
 
+    private Scanner fileScanner;      // Created by student to ensure CVS file can be readn and make packets after first packet full
+
 	// Shared Protocol instance so Client and Server access and operate on the same values for the protocol’s attributes (the above attributes).
 	public static Protocol instance = new Protocol();
 
@@ -87,35 +89,43 @@ public class Protocol {
             e.printStackTrace();
             return;
         }
-        //Concatenating payload string and instantiating segment object
-        String payload = (fileTotalReadings + "," + outputFileName + "," + maxPatchSize);
-        Segment MetaSeg = new Segment(0,SegmentType.Meta,payload,payload.length());
-        System.out.println("Sending Metadata Request");
-
-        //Converts payload of metadata segment to bytes and converts those bytes into a packet to be sent
-        byte[] DataSend = MetaSeg.getPayLoad().getBytes();
-        java.net.DatagramPacket PacketSend = new java.net.DatagramPacket(
-                DataSend,
-                DataSend.length,
-                ipAddress,
-                portNumber
-        );
-        //Tries if the packet can be sent
-        try{
-            //Sends packet to socket and returns message in terminal
-            socket.send(PacketSend);
-            System.out.println("CLIENT: Meta data segment sent to server");
-        }
-        //If packet cannot be found or sent message returned
-        catch(java.io.IOException e){
-            System.out.println("CLIENT ERROR: Failed to send meta data");
-            e.printStackTrace();
-        }
         //If something still saved in Reading variable then the variable is closed as not needed
         finally{
             if(Reading!=null){
                 Reading.close();
             }
+        }
+        //Concatenating payload string and instantiating segment object
+        String payload = (fileTotalReadings + "," + outputFileName + "," + maxPatchSize);
+        Segment metaSeg = new Segment(0,SegmentType.Meta,payload,payload.length());
+        System.out.println("Sending Metadata Request");
+
+        //Tries to send packet
+        try{
+            //Creates baos and oos to send objects to sockets in data packets
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            java.io.ObjectOutputStream oos = new java.io.ObjectOutputStream(baos);
+            //Writes object (metaseg) and turns into oos so can be send in a packet
+            oos.writeObject(metaSeg);
+            oos.flush();
+            //Converts baos to bytesArray to use in packet
+            byte[] sendBytes = baos.toByteArray();
+            java.net.DatagramPacket packet = new java.net.DatagramPacket(
+                    sendBytes,
+                    sendBytes.length,
+                    ipAddress,
+                    portNumber
+            );
+            //Sends packet to socket and returns message in terminal
+            socket.send(packet);
+            System.out.println("CLIENT: Meta data segment sent to server");
+            oos.close();
+            baos.close();
+        }
+        //If packet cannot be found or sent message returned
+        catch(java.io.IOException e){
+            System.out.println("CLIENT ERROR: Failed to send meta data");
+            e.printStackTrace();
         }
         //MetaSegment();
         }
@@ -128,56 +138,58 @@ public class Protocol {
 	public void readAndSend() {
         try{
             //Reads input file and creates list to store payload's if csv lines are bigger than patch size
-            Scanner Reading = new Scanner(inputFile);
-            ArrayList<String> PayLoadList = new ArrayList<String>();
-            //Loops while the there is another line that hasn't been read
-            while (Reading.hasNextLine()) {
-                //Declares payload to save currently read lines and patchcount to count to ensure maxPatch isn't met
-                String Payload = "";
-                int PatchCount = 0;
-                //Loops for max patch size
-                while (Reading.hasNextLine() && maxPatchSize > PatchCount){
-                    //Count increments by 1, reads current line and concatenates to payload
-                    PatchCount++;
-                    String CurLine = Reading.nextLine().trim();
-                    Payload = Payload + (CurLine);
-                    //If there are other records seperate with ";"
-                    if (Reading.hasNextLine()) {
-                        Payload = Payload + (";");
-                    }
-                }
-                //If run out of lines or max patch met, that payload is added to list
-                PayLoadList.add(Payload);
+            if (fileScanner == null) {
+                fileScanner = new Scanner(inputFile);
             }
-            //Loops for the amount of payloads in list
-            for (String i : PayLoadList){
-                //Finds index of payload for segment number and instantiates segment
-                int index = PayLoadList.indexOf(i);
-                int length = i.length();
-                Segment ReadSeg = new Segment((index + 1),SegmentType.Data,i,length);
+            //Declares payload to save currently read lines and patchcount to count to ensure maxPatch isn't met
+            String Payload = "";
+            int PatchCount = 0;
+            //Loops for max patch size
+            while (fileScanner.hasNextLine() && maxPatchSize > PatchCount){
+                //Count increments by 1, reads current line and concatenates to payload
+                PatchCount++;
+                String CurLine = fileScanner.nextLine().trim();
+                Payload = Payload + (CurLine);
+                //If there are other records seperate with ";"
+                if (fileScanner.hasNextLine()) {
+                    Payload = Payload + (";");
+                }
+            }
+            //Instantiates a new segment and displays message
+            Segment ReadSeg = new Segment((totalSegments + 1),SegmentType.Data,Payload,Payload.length());
+            System.out.println("CLIENT: Preparing datapacket for segment number " + (totalSegments+1));
 
-                System.out.println("CLIENT: Preparing datapacket for segment number " + (index + 1));
+            this.dataSeg = ReadSeg;
 
-                byte[] dataByte = ReadSeg.getPayLoad().getBytes();
+            try{
+                //Converts ReadSeg to baos and oos to send in packet to socket
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                java.io.ObjectOutputStream oos = new java.io.ObjectOutputStream(baos);
+                oos.writeObject(ReadSeg);
+                oos.flush();
+                byte[] bytesToSend = baos.toByteArray();
                 java.net.DatagramPacket packet = new java.net.DatagramPacket(
-                        dataByte,
-                        dataByte.length,
+                        bytesToSend,
+                        bytesToSend.length,
                         ipAddress,
                         portNumber
                 );
-                try{
+                System.out.println("CLIENT: Sending datapacket for segment number " + (totalSegments + 1));
                 socket.send(packet);
                 totalSegments++;
-                System.out.println("CLIENT: Sending packet number: " + (index + 1));
+                System.out.println("CLIENT: Sending packet number: " + (totalSegments));
                 System.out.println("CLIENT: Packet length: " + packet.getLength());
                 System.out.println("CLIENT: Packet payload: " + packet.getAddress());
                 System.out.println("CLIENT: Packet port: " + packet.getPort());
                 System.out.println("CLIENT: Packet payload: " + ReadSeg.getPayLoad());
-                }
-                catch(java.io.IOException e){
-                    System.out.println("CLIENT ERROR: Failed to send data");
-                    e.printStackTrace();
-                }
+                System.out.print("------------------------------------------------------------------\n"
+                        + "------------------------------------------------------------------\n");
+                oos.close();
+                baos.close();
+            }
+            catch(java.io.IOException e){
+                System.out.println("CLIENT ERROR: Failed to send data");
+                e.printStackTrace();
             }
         }
         //If there is an issue reading the file
@@ -194,13 +206,79 @@ public class Protocol {
 	 * See coursework specification for full details.
 	 */
 	public boolean receiveAck() {
-        //Prints in terminal message to let user know the current segment
-        System.out.println("CLIENT: Waiting for ACK signal number " + ackSeg.getSeqNum());
-        try{
-            byte[]
+        //Defining expectedSeq to see what sequence number we should be on, if we don't know what it is we set it to -1 as a placeholder
+        int expectedSeq;
+        if (dataSeg != null) {
+            expectedSeq = dataSeg.getSeqNum();
         }
-        catch{
+        else {
+            expectedSeq = -1;
+        }
+        //Checks to see if all Segments have been read
+        if(sentReadings >= fileTotalReadings){
+            System.out.println("CLIENT: All segments acknowledged, total checked segments is " + totalSegments);
+            System.exit(0);
+            return true;
+        }
+        //Prints in terminal message to let user know the current segment, then tries to see if current segment is ackknowledged
+        System.out.println("CLIENT: Waiting for ACK signal number " + dataSeg.getSeqNum());
 
+        try{
+            //Makes temp store for bytes from max segment then receives packet
+            System.out.println("CLIENT: Checking ACK");
+            byte[] tempPacketStore = new byte[MAX_Segment_SIZE];
+            java.net.DatagramPacket ackPacket = new java.net.DatagramPacket(tempPacketStore, tempPacketStore.length);
+            socket.receive(ackPacket);
+            System.out.println("CLIENT: packet sent");
+            //Packet to segment object data
+            int len = ackPacket.getLength();
+            java.io.ByteArrayInputStream bais = new java.io.ByteArrayInputStream(ackPacket.getData(), 0, len);
+            java.io.ObjectInputStream ois = new java.io.ObjectInputStream(bais);
+
+            //Converting stream data to the actual object
+            Segment ack = null;
+            try {
+                ack = (Segment) ois.readObject();
+            }
+            catch (ClassNotFoundException cnfe) {
+                System.out.println("CLIENT ERROR: Received an object of unknown class");
+                cnfe.printStackTrace();
+                ois.close();
+                return false;
+            }
+
+            System.out.println("CLIENT: ACK received - SEQ#" + ack.getSeqNum());
+
+            //Check sequence number
+            if (ack.getSeqNum() != expectedSeq) {
+                System.out.println("CLIENT: Received unexpected ACK seq (expected " + expectedSeq + " but got " + ack.getSeqNum() + ")");
+                try { ois.close(); } catch (Exception ex) {}
+                return false;
+            }
+
+            // update sentReadings by counting readings in the payload of the acknowledged data segment
+            if (dataSeg != null && dataSeg.getPayLoad() != null && dataSeg.getPayLoad().length() > 0) {
+                String[] readings = dataSeg.getPayLoad().split(";");
+                sentReadings += readings.length;
+            }
+
+            System.out.println("CLIENT: ACK matched. Total readings acknowledged so far: " + sentReadings);
+
+            // if all readings acknowledged -> exit as per spec
+            if (sentReadings >= fileTotalReadings) {
+                System.out.println("CLIENT: All segments acknowledged, total checked segments is " + totalSegments);
+                System.exit(0);
+            }
+
+            //FINISH CHECK
+
+            bais.close();
+            ois.close();
+            return true;
+        }
+        catch(Exception e){
+            System.out.println("CLIENT ERROR: Failed to receive ACK signal number");
+            e.printStackTrace();
         }
 		return false;
 	}
